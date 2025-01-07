@@ -23,11 +23,11 @@ type Email struct {
 }
 
 const (
-	ZincURL      = "http://localhost:4080/api/emails/_doc" // Endpoint de ZincSearch
-	ZincUser     = "admin"                                 // Usuario de ZincSearch
-	ZincPassword = "securepassword"                        // Contraseña de ZincSearch
-	TotalEmails  = 500000                                  // Cantidad de correos a generar
-	BatchSize    = 1000                                    // Cantidad de correos por lote
+	ZincURL      = "http://localhost:4080/api/_bulkv2" // Endpoint de ZincSearch
+	ZincUser     = "admin"                             // Usuario de ZincSearch
+	ZincPassword = "securepassword"                    // Contraseña de ZincSearch
+	TotalEmails  = 5000000                             // Cantidad de correos a generar
+	BatchSize    = 1000000                             // Cantidad de correos por lote
 )
 
 func main() {
@@ -35,13 +35,20 @@ func main() {
 	fmt.Println("Iniciando la carga de correos electrónicos...")
 
 	start := time.Now()
+
 	for i := 0; i < TotalEmails; i += BatchSize {
+		fmt.Printf("Lote %d-%d\n", i+1, i+BatchSize)
+		batchStart := time.Now()
 		batch := generateEmails(BatchSize, i)
+		fmt.Printf("Generación del lote %d-%d completada en %v\n", i+1, i+BatchSize, time.Since(batchStart))
+
+		sendStart := time.Now()
 		err := sendBatch(batch)
 		if err != nil {
-			log.Fatalf("Error al enviar lote: %v", err)
+			log.Printf("Error al enviar lote %d-%d: %v\n", i+1, i+BatchSize, err)
+		} else {
+			fmt.Printf("Envío del lote %d-%d completado en %v\n", i+1, i+BatchSize, time.Since(sendStart))
 		}
-		fmt.Printf("Lote %d-%d enviado correctamente\n", i+1, i+BatchSize)
 	}
 
 	fmt.Printf("Proceso completado en %v\n", time.Since(start))
@@ -63,32 +70,34 @@ func generateEmails(count, startID int) []Email {
 	return emails
 }
 
-// sendBatch envía un lote de correos electrónicos a ZincSearch.
+// sendBatch envía un lote de correos electrónicos a ZincSearch usando el endpoint bulk v2.
 func sendBatch(emails []Email) error {
-	for _, email := range emails {
-		data, err := json.Marshal(email)
-		if err != nil {
-			return fmt.Errorf("error al serializar email: %v", err)
-		}
+	bulkData := map[string]interface{}{
+		"index":   "emails", // Asegúrate de que este índice exista en tu ZincSearch
+		"records": emails,
+	}
 
-		req, err := http.NewRequest("POST", ZincURL, bytes.NewBuffer(data))
-		if err != nil {
-			return fmt.Errorf("error al crear la solicitud: %v", err)
-		}
+	data, err := json.Marshal(bulkData)
+	if err != nil {
+		return fmt.Errorf("error al serializar los datos: %v", err)
+	}
 
-		req.SetBasicAuth(ZincUser, ZincPassword)
-		req.Header.Set("Content-Type", "application/json")
+	req, err := http.NewRequest("POST", ZincURL, bytes.NewBuffer(data))
+	if err != nil {
+		return fmt.Errorf("error al crear la solicitud: %v", err)
+	}
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("error al enviar la solicitud: %v", err)
-		}
+	req.SetBasicAuth(ZincUser, ZincPassword)
+	req.Header.Set("Content-Type", "application/json")
 
-		defer resp.Body.Close()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("error al enviar la solicitud: %v", err)
+	}
+	defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("error del servidor, código HTTP: %d", resp.StatusCode)
-		}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("error del servidor, código HTTP: %d", resp.StatusCode)
 	}
 
 	return nil
